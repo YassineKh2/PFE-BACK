@@ -1,7 +1,9 @@
 from firebase_admin import firestore
 from werkzeug.utils import secure_filename
 import os
-from datetime import datetime,timezone
+from datetime import datetime, timezone, timedelta
+from Users.Functions import GetProgress
+
 
 def SaveCourse(request):
     try:
@@ -122,3 +124,81 @@ def DeleteCourse(id):
     except Exception as e:
         print(f"An error occurred: {e}")
         return {"error": str(e)}, 500      
+
+def GetCourseStatistics(course_id):
+    try:
+        db = firestore.client()
+        course_ref = db.collection("courses").document(course_id)
+        course_doc = course_ref.get()
+        if not course_doc.exists:
+            return {"error": "Course not found"}, 404
+
+        course_data = course_doc.to_dict()
+        enrolled_students = course_data.get("enrolledStudents", [])
+        total_enrolled = len(enrolled_students)
+
+        # Calculate overall completion rate
+        total_completion = 0
+        for user_id in enrolled_students:
+            user_progress = GetProgress(user_id)
+            if user_progress:
+                course_progress = next((item for item in user_progress if item.get("courseId") == course_id), None)
+                if course_progress:
+                    total_completion += course_progress.get("progress", 0)
+        completion_rate = (total_completion / total_enrolled) if total_enrolled > 0 else 0
+
+        # Calculate enrollment rate this month, average completion time, and dropout rate
+        users_ref = db.collection("users")
+        users_docs = users_ref.stream()
+        enrolled_this_month = 0
+        completion_times = []
+        dropout_count = 0
+        now = datetime.now(timezone.utc)
+        two_months_ago = now - timedelta(days=60)
+        for user_doc in users_docs:
+            user_data = user_doc.to_dict()
+            enrolled_courses = user_data.get("enrolledCourses", {})
+            course_info = enrolled_courses.get(course_id)
+            if course_info:
+                enrolled_at = course_info.get("enrolledAt")
+                finished_at = course_info.get("finishedAt")
+                progress = course_info.get("progress", 0)
+                # Enrolled this month
+                if enrolled_at:
+                    try:
+                        enrolled_at_dt = datetime.fromisoformat(enrolled_at)
+                        if enrolled_at_dt.year == now.year and enrolled_at_dt.month == now.month:
+                            enrolled_this_month += 1
+                    except Exception:
+                        pass
+                # Average completion time for those who finished
+                if enrolled_at and finished_at and progress == 100:
+                    try:
+                        enrolled_at_dt = datetime.fromisoformat(enrolled_at)
+                        finished_at_dt = datetime.fromisoformat(finished_at)
+                        completion_time = (finished_at_dt - enrolled_at_dt).total_seconds() / 3600  # in hours
+                        completion_times.append(completion_time)
+                    except Exception:
+                        pass
+                # Dropout: not finished and enrolledAt > 2 months ago
+                if enrolled_at and (progress < 100 or not finished_at):
+                    try:
+                        enrolled_at_dt = datetime.fromisoformat(enrolled_at)
+                        if enrolled_at_dt < two_months_ago:
+                            dropout_count += 1
+                    except Exception:
+                        pass
+
+        avg_completion_time = (sum(completion_times) / len(completion_times)) if completion_times else 0
+        dropout_rate = (dropout_count / total_enrolled) * 100 if total_enrolled > 0 else 0
+
+        return {
+            "totalEnrolled": total_enrolled,
+            "completionRate": completion_rate,
+            "enrolledThisMonth": enrolled_this_month,
+            "averageCompletionTimeHours": avg_completion_time,
+            "dropoutRate": dropout_rate
+        }, 200
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return {"error": str(e)}, 500
