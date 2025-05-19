@@ -7,3 +7,6 @@ scikit-learn~=1.6.1
 prophet~=1.1.6
 firebase_admin
 flask_cors
+groq~=0.25.0
+instructor~=1.8.2
+pydantic~=2.11.4

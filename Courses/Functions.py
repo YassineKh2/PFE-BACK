@@ -2,7 +2,7 @@ from firebase_admin import firestore
 from werkzeug.utils import secure_filename
 import os
 from datetime import datetime, timezone, timedelta
-from Users.Functions import GetProgress
+from Users.Functions import GetProgress,GetSingleProgress
 
 
 def SaveCourse(request):
@@ -199,6 +199,41 @@ def GetCourseStatistics(course_id):
             "averageCompletionTimeHours": avg_completion_time,
             "dropoutRate": dropout_rate
         }, 200
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return {"error": str(e)}, 500
+
+
+def GetEnrolledStudents(course_id):
+    try:
+        db = firestore.client()
+        course_ref = db.collection("courses").document(course_id)
+        course_doc = course_ref.get()
+
+        if not course_doc.exists:
+            return {"error": "Course not found"}, 404
+
+        course_data = course_doc.to_dict()
+        enrolled_students = course_data.get("enrolledStudents", [])
+
+        students_data = []
+        for user_id in enrolled_students:
+            # Retrieve the full user object
+            user_ref = db.collection("users").document(user_id)
+            user_doc = user_ref.get()
+            if not user_doc.exists:
+                continue
+
+            user_data = user_doc.to_dict()
+            user_data["id"] = user_id  # Include the user ID
+
+            # Retrieve the progress for the course
+            progress = GetSingleProgress(user_id, course_id)
+            user_data["progress"] = progress if progress else {}
+
+            students_data.append(user_data)
+
+        return {"students": students_data}, 200
     except Exception as e:
         print(f"An error occurred: {e}")
         return {"error": str(e)}, 500

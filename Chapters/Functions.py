@@ -2,7 +2,7 @@ from firebase_admin import firestore
 from werkzeug.utils import secure_filename
 import os
 from datetime import datetime, timezone
-
+from Quizzes.Functions import create_and_save_quiz
 
 def SaveChapter(request):
     try:
@@ -44,14 +44,16 @@ def SaveChapter(request):
                 new_duration = current_duration + chapter_duration
                 course_ref.update({"duration": new_duration})
 
-
-
         date, response = db.collection("chapters").add(data)
+        # Call create_and_save_quiz after adding a chapter
+        course_id = data.get("courseId")
+        title = data.get("title", "")
+        if course_id and title:
+            create_and_save_quiz(course_id, title)
         return {"data": response.id}, 200
     except Exception as e:
         print(f"An error occurred: {e}")
         return {"error": str(e)}, 500
-
 
 def GetChapters():
     try:
@@ -68,7 +70,6 @@ def GetChapters():
         print(f"An error occurred: {e}")
         return {"error": str(e)}, 500
 
-
 def GetChapter(id):
     try:
         db = firestore.client()
@@ -82,7 +83,6 @@ def GetChapter(id):
     except Exception as e:
         print(f"An error occurred: {e}")
         return None
-
 
 def UpdateChapter(id, request):
     try:
@@ -152,6 +152,11 @@ def UpdateChapter(id, request):
                 course_ref.update({"duration": updated_course_duration})
 
         doc_ref.update(data)
+        # Call create_and_save_quiz after updating a chapter
+        course_id = data.get("courseId") or chapter_data.get("courseId")
+        title = data.get("title") or chapter_data.get("title", "")
+        if course_id and title:
+            create_and_save_quiz(course_id, title)
         return {"data": "Chapter updated successfully"}, 200
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -185,7 +190,6 @@ def DeleteChapter(id):
             for idx, c in enumerate(chapters_sorted, start=1):
                 db.collection("chapters").document(c.id).update({"order": str(idx)})
 
-
         # Update the course duration after deleting the chapter
         if course_id:
             course_ref = db.collection("courses").document(course_id)
@@ -199,6 +203,12 @@ def DeleteChapter(id):
 
         # Delete the document from Firestore
         db.collection("chapters").document(id).delete()
+        # Call create_and_save_quiz after deleting a chapter
+        chapter_data = doc.to_dict()
+        course_id = chapter_data.get("courseId")
+        title = chapter_data.get("title", "")
+        if course_id and title:
+            create_and_save_quiz(course_id, title)
         return {"data": "Chapter deleted successfully"}, 200
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -217,4 +227,4 @@ def GetChapterByCourse(course_id):
         return chapters
     except Exception as e:
         print(f"An error occurred: {e}")
-        return {"error": str(e)}, 500    
+        return {"error": str(e)}, 500

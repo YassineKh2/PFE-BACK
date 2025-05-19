@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from Users.Functions import Enroll, GetCourses, GetStateCourses, GetProgress, GetSingleProgress, UpdateProgress, \
-    GetUserLearningStats, GetRecentActivity
+    GetUserLearningStats, GetRecentActivity,GetAll
 
 UsersRoutes = Blueprint('UsersRoutes', __name__)
 
@@ -87,5 +87,18 @@ def Activity(id):
                 return jsonify({"message": "No courses found"}), 404
 
             return jsonify({"data": response}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+
+@UsersRoutes.route(baseurl + "/all", methods=['GET'])
+def Users():
+    if request.method == 'GET':
+        try:
+            response = GetAll()
+            if response is None:
+                return jsonify({"message": "No courses found"}), 404
+
+            return jsonify(response), 200
         except Exception as e:
             return jsonify({"error": str(e)}), 500

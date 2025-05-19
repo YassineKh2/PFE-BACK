@@ -380,3 +380,19 @@ def GetRecentActivity(id):
         return {"error": str(e)}, 500
 
 
+def GetAll():
+    try:
+        db = firestore.client()
+        users_ref = db.collection("users")
+        users_docs = users_ref.stream()
+
+        users = []
+        for doc in users_docs:
+            user_data = doc.to_dict()
+            user_data["id"] = doc.id
+            users.append(user_data)
+
+        return users, 200
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return {"error": str(e)}, 500

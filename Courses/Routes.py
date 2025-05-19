@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from Courses.Functions import SaveCourse,GetCourses,GetCourse,UpdateCourse,DeleteCourse,GetCourseStatistics
+from Courses.Functions import SaveCourse,GetCourses,GetCourse,UpdateCourse,DeleteCourse,GetCourseStatistics,GetEnrolledStudents
 
 CoursesRoutes = Blueprint('CoursesRoutes', __name__)
 
@@ -43,7 +43,7 @@ def course(id):
         return jsonify(response), status
 
 
-@CoursesRoutes.route(baseurl + "/stats/<id>", methods=['GET', "POST", 'DELETE'])
+@CoursesRoutes.route(baseurl + "/stats/<id>", methods=['GET'])
 def CourseStatistics(id):
     if request.method == 'GET':
         response = GetCourseStatistics(id)
@@ -51,4 +51,14 @@ def CourseStatistics(id):
             return jsonify({"message": "No course found"}), 404
 
         return jsonify({"data": response}), 200
+
+
+@CoursesRoutes.route(baseurl + "/enrolled/<id>", methods=['GET'])
+def GetEnrolledStudent(id):
+    if request.method == 'GET':
+        response = GetEnrolledStudents(id)
+        if response is None:
+            return jsonify({"message": "No course found"}), 404
+
+        return jsonify(response), 200
 
