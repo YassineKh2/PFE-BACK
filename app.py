@@ -8,6 +8,7 @@ from Chapters.Routes import ChaptersRoutes
 from Users.Routes import UsersRoutes
 from Certificates.Routes import CertificateRoutes
 from Comments.Routes import CommentsRoutes
+from Quizzes.Routes import QuizzesRoutes
 from Firebase import setupfirebase
 
 
@@ -19,6 +20,7 @@ app.register_blueprint(ChaptersRoutes)
 app.register_blueprint(UsersRoutes)
 app.register_blueprint(CertificateRoutes)
 app.register_blueprint(CommentsRoutes)
+app.register_blueprint(QuizzesRoutes)
 setupfirebase()
 
 

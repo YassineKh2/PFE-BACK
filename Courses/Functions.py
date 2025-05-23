@@ -3,6 +3,7 @@ from werkzeug.utils import secure_filename
 import os
 from datetime import datetime, timezone, timedelta
 from Users.Functions import GetProgress,GetSingleProgress
+import json
 
 
 def SaveCourse(request):
@@ -80,6 +81,11 @@ def UpdateCourse(id, request):
         data = request.form.to_dict()
         now = now = datetime.now(timezone.utc)
         data['editedAt'] = now
+
+        # Ensure enrolledStudents is always an array
+        if 'enrolledStudents' in data and not isinstance(data['enrolledStudents'], list):
+            data['enrolledStudents'] = [s.strip() for s in data['enrolledStudents'].split(',') if s.strip()]
+
         # File handling logic
         if 'file' in request.files:
             file = request.files['file']

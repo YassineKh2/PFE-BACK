@@ -134,9 +134,23 @@ def create_and_save_quiz(course_id: str, title: str, passing_score: int = 7, cha
         # Keep original createdAt if present
         existing_data = existing_quizzes[0].to_dict()
         quiz_doc["createdAt"] = existing_data.get("createdAt", now)
+        # Remove previous questions and set new ones
+        quiz_ref.update({
+            "questions": [],  # Clear previous questions first
+        })
         quiz_ref.update(quiz_doc)
     else:
         # Save to Firestore
         quizzes_ref.add(quiz_doc)
 
     return quiz_doc
+
+
+
+def get_quizzes_by_course(course_id: str):
+    db = firestore.client()
+    quizzes_ref = db.collection("quizzes").where("courseId", "==", course_id)
+    quizzes = [doc.to_dict() | {"id": doc.id} for doc in quizzes_ref.stream()]
+    if not quizzes:
+        return {"error": "No quizzes found for this course"}, 404
+    return quizzes

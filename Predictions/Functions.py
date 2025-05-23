@@ -170,4 +170,15 @@ def forecast_from_data(data):
     pred.reset_index(drop=True, inplace=True)
     pred.insert(0, 'index', pred.index)
 
+    # Remove negative values from predictions
+    pred = pred[(pred['value'] >= 0) & (pred['min'] >= 0) & (pred['max'] >= 0)]
+
+    # Remove extreme values using IQR for the 'value' column
+    Q1 = pred['value'].quantile(0.25)
+    Q3 = pred['value'].quantile(0.75)
+    IQR = Q3 - Q1
+    lower_bound = Q1 - 1.5 * IQR
+    upper_bound = Q3 + 1.5 * IQR
+    pred = pred[(pred['value'] >= lower_bound) & (pred['value'] <= upper_bound)]
+
     return pred

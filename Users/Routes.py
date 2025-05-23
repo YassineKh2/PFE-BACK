@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from Users.Functions import Enroll, GetCourses, GetStateCourses, GetProgress, GetSingleProgress, UpdateProgress, \
-    GetUserLearningStats, GetRecentActivity,GetAll
+    GetUserLearningStats, GetRecentActivity, GetAll, SavePreferences, GetInformation, SaveSystemPreferences, UpdateSystemPreferencesRefused
 
 UsersRoutes = Blueprint('UsersRoutes', __name__)
 
@@ -100,5 +100,57 @@ def Users():
                 return jsonify({"message": "No courses found"}), 404
 
             return jsonify(response), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+
+@UsersRoutes.route(baseurl + "/preferences/<id>", methods=['GET', 'POST'])
+def Preferences(id):
+    if request.method == 'POST':
+        try:
+            response = SavePreferences(id, request)
+            if response is None:
+                return jsonify({"message": "No courses found"}), 404
+
+            return jsonify(response), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+
+@UsersRoutes.route(baseurl + "/systempreferences/<id>", methods=['GET', 'POST'])
+def SystemPreferences(id):
+    if request.method == 'POST':
+        try:
+            response = SaveSystemPreferences(id, request)
+            if response is None:
+                return jsonify({"message": "No courses found"}), 404
+
+            return jsonify(response), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+
+@UsersRoutes.route(baseurl + "/systempreferences/refuse/<id>", methods=['GET', 'POST'])
+def RefuseSystemPreferences(id):
+    if request.method == 'POST':
+        try:
+            response = UpdateSystemPreferencesRefused(id)
+            if response is None:
+                return jsonify({"message": "No courses found"}), 404
+
+            return jsonify(response), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+
+@UsersRoutes.route(baseurl + "/<id>", methods=['GET', 'POST'])
+def User(id):
+    if request.method == 'GET':
+        try:
+            response = GetInformation(id)
+            if response is None:
+                return jsonify({"message": "No courses found"}), 404
+
+            return jsonify(response)
         except Exception as e:
             return jsonify({"error": str(e)}), 500
