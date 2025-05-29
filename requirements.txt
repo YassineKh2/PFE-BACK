@@ -10,3 +10,7 @@ flask_cors
 groq~=0.25.0
 instructor~=1.8.2
 pydantic~=2.11.4
+easyocr
+opencv-python-headless
+fastmrz
+pytesseract
