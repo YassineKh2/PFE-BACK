@@ -1,7 +1,9 @@
 from firebase_admin import firestore
 from werkzeug.utils import secure_filename
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
+from Helpers.MRZScane import GetMRZData
+from Helpers.MinerU import extract_markdown
 
 
 def SaveDeposit(id, request):
@@ -55,7 +57,7 @@ def SaveDeposit(id, request):
 
         if user_doc.exists:
             try:
-            # Parse deposit amount and determine tier
+                # Parse deposit amount and determine tier
                 deposit_amount = float(data.get("amount", 0))
 
                 if deposit_amount >= 25000:
@@ -72,7 +74,6 @@ def SaveDeposit(id, request):
             except ValueError:
                 print("Invalid deposit amount, skipping tier update.")
 
-
             return "200"
         else:
             return {"error": "Failed to save deposit"}, 500
@@ -80,3 +81,13 @@ def SaveDeposit(id, request):
     except Exception as e:
         print(f"An error occurred: {e}")
         return {"error": str(e)}, 500
+
+
+def VerifyDeposit(deposit):
+    PersonalIDFile = deposit['uploadedDocuments'].personalId
+    MRZData = GetMRZData(PersonalIDFile)
+    # TODO process data and compare
+    IncomeProof = deposit['uploadedDocuments'].IncomeProof
+    IncomeProofMarkdown = extract_markdown(IncomeProof)
+    # TODO Call groq and cross verify the data
+

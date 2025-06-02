@@ -1,7 +1,4 @@
 def extract_text_from_rich_content(data: dict) -> str:
-    """
-    Recursively extracts plain text from a Tiptap-style rich text JSON document.
-    """
     texts = []
 
     def traverse(node):

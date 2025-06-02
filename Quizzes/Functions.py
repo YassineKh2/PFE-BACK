@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 import instructor
 from datetime import datetime
 
-from Helpers import extract_text_from_rich_content
+from Helpers.ExtractTextFromEditor import extract_text_from_rich_content
 
 load_dotenv()
 
