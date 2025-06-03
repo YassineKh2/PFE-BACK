@@ -359,6 +359,9 @@ def VerifyDeposit(deposit):
     # if MRZData["status"] == "FAILURE":
     #     result = verify_identity_with_AI(deposit, MRZData)
 
+
+    
+
     fullName = deposit.get('fullName', '').strip()
     pincode = deposit.get('pincode')
     city = deposit.get('city')
