@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from Deposit.Functions import SaveDeposit
+from Deposit.Functions import SaveDeposit,VerifyDeposit
 
 
 DepositRoutes = Blueprint('DepositRoutes', __name__)
@@ -10,4 +10,10 @@ baseurl = "/deposit"
 def deposit(id):
     if request.method == 'POST':
         response = SaveDeposit(id,request)
+        return response
+
+@DepositRoutes.route(baseurl, methods=['POST'])
+def validate():
+    if request.method == 'POST':
+        response = VerifyDeposit(request)
         return response

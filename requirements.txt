@@ -14,3 +14,9 @@ easyocr
 opencv-python-headless
 fastmrz
 pytesseract
+magic-pdf[full-cpu]
+fuzzywuzzy[speedup]
+ultralytics
+doclayout_yolo
+rapid_table
+omegaconf

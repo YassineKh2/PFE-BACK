@@ -6,10 +6,19 @@ from magic_pdf.config.enums import SupportedPdfParseMethod
 from magic_pdf.data.read_api import read_local_images
 
 def extract_markdown(input_path: str) -> str:
+
+    
+    base_dir = os.path.dirname(os.path.abspath(__file__)) 
+    project_root = os.path.dirname(base_dir)
+
+    input_path = os.path.join(project_root, "Files", input_path)
+
+
     # Define temporary directories for processing
     local_image_dir = "output/images"
     os.makedirs(local_image_dir, exist_ok=True)
     image_writer = FileBasedDataWriter(local_image_dir)
+
 
     # Determine the file extension
     _, ext = os.path.splitext(input_path)
@@ -45,3 +54,6 @@ def extract_markdown(input_path: str) -> str:
 
     else:
         raise ValueError("Unsupported file type. Please provide a PDF or image file.")
+
+
+
