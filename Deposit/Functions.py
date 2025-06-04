@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any
 from instructor import from_groq, Mode
 from groq import Groq
 import json
-
+import threading
 
 class IdentityVerificationResult(BaseModel):
     name_similarity: int
@@ -19,7 +19,7 @@ class IdentityVerificationResult(BaseModel):
     id_match: bool
     dob_match: bool
     all_fields_match: bool
-    notes: Optional[str]
+    explanation: Optional[str]
 
 
 class IdentityVerificationAIResult(BaseModel):
@@ -37,7 +37,7 @@ class AIResult(BaseModel):
     net_pay_detected: bool
     salary_bracket: str
     salary_bracket_match: bool
-    all_fields_verified: bool
+    all_fields_match: bool
     explanation: str
 
 
@@ -46,7 +46,7 @@ class BankStatementAIResult(BaseModel):
     address_match: bool
     iban_match: bool
     bic_match: bool
-    all_fields_verified: bool
+    all_fields_match: bool
     explanation: str
 
 
@@ -76,15 +76,15 @@ def verify_identity(deposit: Dict[str, str], MRZData: Dict[str, str]) -> Dict[st
         "id_match": id_match,
         "dob_match": dob_match,
         "all_fields_match": all_fields_match,
-        "notes": []
+        "explanation": []
     }
 
     if not name_match:
-        result["notes"].append(f"Name mismatch: '{fullName}' vs '{MRZName}'")
+        result["explanation"].append(f"Name mismatch: '{fullName}' vs '{MRZName}'")
     if not id_match:
-        result["notes"].append(f"ID mismatch: '{personalId}' vs '{MRZId}'")
+        result["explanation"].append(f"ID mismatch: '{personalId}' vs '{MRZId}'")
     if not dob_match:
-        result["notes"].append(
+        result["explanation"].append(
             f"Date of birth mismatch: '{dateOfBirth_raw}' vs '{MRZdateOfBirth_raw}'")
 
     return result
@@ -200,8 +200,8 @@ def verify_payslip_with_AI(payslip_text: str, expected_name: str, salary_key: st
             "date_valid": true/false,
             "net_pay_detected": true/false,
             "salary_bracket": "string",
-            "salary_bracket_match": true/false,
-            "all_fields_verified": true/false,
+            "salary_bracket_match": true/false,ss
+            "all_fields_match": true/false,
             "explanation": "string"
         }}
     """
@@ -251,7 +251,7 @@ def verify_bank_statement_with_AI(
         "address_match": true or false,
         "iban_match": true or false,
         "bic_match": true or false,
-        "all_fields_verified": true or false,
+        "all_fields_match": true or false,
         "explanation": "A concise explanation of what matched and what didn't."
         }}
     """
@@ -267,6 +267,56 @@ def verify_bank_statement_with_AI(
     )
 
     return response.model_dump()
+
+
+def VerifyDeposit(deposit):
+    # Personal ID   
+    PersonalIDFile = deposit['uploadedDocuments']['personalId']
+    MRZData = GetMRZData(PersonalIDFile)
+    MRZData = json.loads(MRZData)
+    if MRZData["status"] == "SUCCESS":
+        result = verify_identity(deposit,MRZData)
+
+    if MRZData["status"] == "FAILURE":
+        result = verify_identity_with_AI(deposit, MRZData)
+
+
+    if result['all_fields_match'] == False:
+        return False,result['explanation']
+
+    print("Passed PERSONAL ID")
+
+    fullName = deposit.get('fullName', '').strip()
+    pincode = deposit.get('pincode')
+    annualIncome = deposit.get('annualIncome')
+    city = deposit.get('city')
+    address = deposit.get('address')
+    ibanCode = deposit.get('ibanCode')
+    bicId = deposit.get('bicId')
+    fulladress = address+city+pincode
+
+
+    # Income Proof 
+    IncomeProof = deposit['uploadedDocuments']['incomeProof']
+    IncomeProofMarkdown = extract_markdown(IncomeProof)
+    result = verify_payslip_with_AI(IncomeProofMarkdown, fullName, annualIncome)
+
+    if result['all_fields_match'] == False:
+        return False,result['explanation']
+
+    print("Passed INCOME PROOF")
+
+    # Bank Statement 
+    bankStatement = deposit['uploadedDocuments']['bankStatement']
+    bankStatementMarkdown = extract_markdown(bankStatement)
+    result = verify_bank_statement_with_AI(bankStatementMarkdown,fullName,fulladress,ibanCode,bicId)
+
+    if result['all_fields_match'] == False:
+        return False,result['explanation']
+
+    print("Passed BANK STATEMENT")
+
+    return True,result['explanation']
 
 
 def SaveDeposit(id, request):
@@ -337,53 +387,25 @@ def SaveDeposit(id, request):
             except ValueError:
                 print("Invalid deposit amount, skipping tier update.")
 
+
+            # Handle quiz creation in background
+            def async_verify():
+                result = VerifyDeposit(data)
+                status = "Accepted" if result[0] == True else "Rejected"
+                db.collection("deposits").document(id).update({
+                    "status": status,
+                    "editedAt": datetime.now(timezone.utc)
+                })
+
+            threading.Thread(target=async_verify).start()   
+
             return "200"
         else:
             return {"error": "Failed to save deposit"}, 500
+        
+
 
     except Exception as e:
         print(f"An error occurred: {e}")
         return {"error": str(e)}, 500
 
-
-def VerifyDeposit(deposit):
-    deposit = deposit.get_json()
-
-    # Personal ID
-    # PersonalIDFile = deposit['uploadedDocuments']['personalId']
-    # MRZData = GetMRZData(PersonalIDFile)
-    # MRZData = json.loads(MRZData)
-    # if MRZData["status"] == "SUCCESS":
-    #     result = verify_identity(deposit,MRZData)
-
-    # if MRZData["status"] == "FAILURE":
-    #     result = verify_identity_with_AI(deposit, MRZData)
-
-
-    
-
-    fullName = deposit.get('fullName', '').strip()
-    pincode = deposit.get('pincode')
-    city = deposit.get('city')
-    address = deposit.get('address')
-    ibanCode = deposit.get('ibanCode')
-    bicId = deposit.get('bicId')
-    fulladress = address+city+pincode
-
-
-    # Income Proof 
-    # IncomeProof = deposit['uploadedDocuments']['IncomeProof']
-    # IncomeProofMarkdown = extract_markdown(IncomeProof)
-    # result = verify_payslip_with_AI(IncomeProofMarkdown, fullName, annualIncome)
-
-
-    # Bank Statement 
-    
-    bankStatement = deposit['uploadedDocuments']['bankStatement']
-    bankStatementMarkdown = extract_markdown(bankStatement)
-    result = verify_bank_statement_with_AI(bankStatementMarkdown,fullName,fulladress,ibanCode,bicId)
-
-
-
-
-    return result
