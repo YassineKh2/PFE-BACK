@@ -11,10 +11,14 @@ from Comments.Routes import CommentsRoutes
 from Quizzes.Routes import QuizzesRoutes
 from Deposit.Routes import DepositRoutes
 from Firebase import setupfirebase
+from Socket import socketio
+import Chat.Routes 
 
+FRONTEND_URL = "http://localhost:5173"
 
 app = Flask(__name__)
 CORS(app)
+socketio.init_app(app, cors_allowed_origins=[FRONTEND_URL])
 app.register_blueprint(MutualFundsRoutes)
 app.register_blueprint(CoursesRoutes)
 app.register_blueprint(ChaptersRoutes)
@@ -25,10 +29,5 @@ app.register_blueprint(QuizzesRoutes)
 app.register_blueprint(DepositRoutes)
 setupfirebase()
 
-
-
-
-
 if __name__ == '__main__':
-
-    app.run(debug=True)
+    socketio.run(app)
