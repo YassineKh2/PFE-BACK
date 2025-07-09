@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from Users.Functions import Enroll, GetCourses, GetStateCourses, GetProgress, GetSingleProgress, UpdateProgress, \
-    GetUserLearningStats, GetRecentActivity, GetAll, SavePreferences, GetInformation, SaveSystemPreferences, UpdateSystemPreferencesRefused
+    GetUserLearningStats, GetRecentActivity, GetAll, SavePreferences, GetInformation, SaveSystemPreferences, UpdateSystemPreferencesRefused, \
+    GetManagerId, GetManagedUsers
 
 UsersRoutes = Blueprint('UsersRoutes', __name__)
 
@@ -154,3 +155,19 @@ def User(id):
             return jsonify(response)
         except Exception as e:
             return jsonify({"error": str(e)}), 500
+
+
+@UsersRoutes.route(baseurl + "/manager/<id>", methods=['GET'])
+def ManagerId(id):
+    if request.method == 'GET':
+        response, status = GetManagerId(id)
+        return jsonify(response), status
+
+
+@UsersRoutes.route(baseurl + "/managedusers/<id>", methods=['GET'])
+def ManagedUsers(id):
+    if request.method == 'GET':
+        response, status = GetManagedUsers(id)
+        return jsonify(response), status
+
+

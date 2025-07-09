@@ -12,6 +12,7 @@ from instructor import from_groq, Mode
 from groq import Groq
 import json
 import threading
+import random
 
 class IdentityVerificationResult(BaseModel):
     name_similarity: int
@@ -362,6 +363,10 @@ def SaveDeposit(id, request):
         data['createdAt'] = now
         data['editedAt'] = now
 
+
+        deposit_amount = float(data.get("amount", 0))
+        data['availableFunds'] = deposit_amount
+
         db = firestore.client()
         db.collection("deposits").document(id).set(data)
 
@@ -371,8 +376,6 @@ def SaveDeposit(id, request):
         if user_doc.exists:
             try:
                 # Parse deposit amount and determine tier
-                deposit_amount = float(data.get("amount", 0))
-
                 if deposit_amount >= 25000:
                     tier = "Platinum"
                 elif deposit_amount >= 5000:
@@ -396,6 +399,32 @@ def SaveDeposit(id, request):
                     "status": status,
                     "editedAt": datetime.now(timezone.utc)
                 })
+                
+                managers = db.collection("users").where("role", "==", "manager").stream()
+                manager_ids = [mgr.id for mgr in managers]
+                if manager_ids:
+                    selected_manager_id = random.choice(manager_ids)
+                    user_ref.update({"managerId": selected_manager_id})
+
+                    manager_ref = db.collection("users").document(selected_manager_id)
+                    manager_doc = manager_ref.get()
+                    if manager_doc.exists:
+                        managed_users = manager_doc.to_dict().get("managedUsers", [])
+                        if id not in managed_users:
+                            managed_users.append(id)
+                            manager_ref.update({"managedUsers": managed_users})
+
+
+                    chat_data = {
+                        "iduser1": id,
+                        "iduser2": selected_manager_id,
+                        "createdAt": datetime.now(timezone.utc),
+                        "chats": []
+                    }
+                    chat_ref = db.collection("chats").document()
+                    chat_ref.set(chat_data)
+                    
+
 
             threading.Thread(target=async_verify).start()   
 
@@ -409,3 +438,280 @@ def SaveDeposit(id, request):
         print(f"An error occurred: {e}")
         return {"error": str(e)}, 500
 
+
+def get_available_funds(user_id:str):
+    try:
+        db = firestore.client()
+        doc_ref = db.collection("deposits").document(user_id)
+        doc = doc_ref.get()
+        if doc.exists:
+            data = doc.to_dict()
+            print(data)
+            return data.get("availableFunds")
+        else:
+            return None
+    except Exception as e:
+        print(f"Error retrieving available funds for {user_id}: {e}")
+        return None
+
+
+def add_funds(user_id, request):
+    try:
+        db = firestore.client()
+        doc_ref = db.collection("deposits").document(user_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return {"error": "Deposit record not found"}, 404
+
+        if request.is_json:
+            try:
+                req_data = request.get_json(force=True, silent=True)
+                if isinstance(req_data, dict):
+                    amount = float(req_data.get("amount", 0))
+                else:
+                    amount = float(req_data)
+            except Exception:
+                amount = 0
+        else:
+            amount = float(request.form.get("amount", 0))
+
+        if amount <= 0:
+            return {"error": "Amount must be positive"}, 400
+
+        data = doc.to_dict()
+        current_funds = float(data.get("availableFunds", 0))
+        new_funds = current_funds + amount
+
+        log_data = {
+            'userId': user_id,
+            'action': 'Deposit',
+            'date': datetime.now(timezone.utc),    
+            'description': "Bank",
+            'amount': amount
+        }
+
+        db.collection('logs').add(log_data)
+
+        doc_ref.update({
+            "availableFunds": new_funds,
+            "editedAt": datetime.now(timezone.utc)
+        })
+        return {"availableFunds": new_funds}
+    except Exception as e:
+        print(f"Error adding funds for {user_id}: {e}")
+        return {"error": str(e)}, 500
+
+
+def buy_asset(user_id, asset_data):
+    try:
+        db = firestore.client()
+        isin = asset_data.get('isin')
+        amount_invested = float(asset_data.get('amount_invested', 0))
+        nav_price = float(asset_data.get('nav_price', 0))
+        name = asset_data.get('name')
+        purchase_date = datetime.now(timezone.utc)
+        if not isin or nav_price <= 0 or amount_invested <= 0:
+            return {'error': 'Invalid asset data'}, 400
+        # Retrieve and update availableFunds
+        deposit_ref = db.collection('deposits').document(user_id)
+        deposit_doc = deposit_ref.get()
+        if not deposit_doc.exists:
+            return {'error': 'Deposit record not found'}, 404
+        deposit_data = deposit_doc.to_dict()
+        current_funds = float(deposit_data.get('availableFunds', 0))
+        if amount_invested > current_funds:
+            return {'error': 'Insufficient available funds'}, 400
+        new_funds = current_funds - amount_invested
+        deposit_ref.update({
+            'availableFunds': new_funds,
+            'editedAt': datetime.now(timezone.utc)
+        })
+        num_shares = amount_invested / nav_price
+        asset_doc = {
+            'isin': isin,
+            'name': name,
+            'nav': nav_price,
+            'shares': num_shares,
+            'purchaseDate': purchase_date
+        }
+
+        log_data = {
+            'userId': user_id,
+            'action': 'Buy',
+            'date': datetime.now(timezone.utc),
+            'type': 'SIP',    
+            'description': name,
+            'amount': amount_invested
+        }
+
+        db.collection('logs').add(log_data)
+       
+
+
+        assets_ref = db.collection('assets').document(user_id)
+        assets_doc = assets_ref.get()
+        merged = False
+        if assets_doc.exists:
+            assets_data = assets_doc.to_dict()
+            assets_list = assets_data.get('assets', [])
+            for i, existing_asset in enumerate(assets_list):
+                if existing_asset.get('isin') == isin:
+                    total_shares = float(existing_asset.get('shares', 0)) + num_shares
+                    assets_list[i] = {
+                        'isin': isin,
+                        'name': name,
+                        'nav': nav_price,
+                        'shares': total_shares,
+                        'purchaseDate': purchase_date
+                    }
+                    merged = True
+                    break
+            if merged:
+                assets_ref.set({'assets': assets_list}, merge=True)
+                return {'message': 'Asset merged successfully', 'asset': assets_list[i], 'availableFunds': new_funds}, 200
+            else:
+                assets_ref.set({'assets': firestore.ArrayUnion([asset_doc])}, merge=True)
+                return {'message': 'Asset saved successfully', 'asset': asset_doc, 'availableFunds': new_funds}, 200
+        else:
+            assets_ref.set({'assets': [asset_doc]}, merge=True)
+            return {'message': 'Asset saved successfully', 'asset': asset_doc, 'availableFunds': new_funds}, 200
+    except Exception as e:
+        print(f"Error saving asset for {user_id}: {e}")
+        return {'error': str(e)}, 500
+
+
+def get_assets(user_id):
+    try:
+        db = firestore.client()
+        assets_ref = db.collection('assets').document(user_id)
+        assets_doc = assets_ref.get()
+        if assets_doc.exists:
+            assets_data = assets_doc.to_dict()
+            return {'assets': assets_data.get('assets', [])}, 200
+        else:
+            return {'assets': []}, 200
+    except Exception as e:
+        print(f"Error retrieving assets for {user_id}: {e}")
+        return {'error': str(e)}, 500
+
+
+def get_portfolio_metrics(user_id):
+    try:
+        db = firestore.client()
+        # Get available funds
+        deposit_ref = db.collection('deposits').document(user_id)
+        deposit_doc = deposit_ref.get()
+        available_funds = 0
+        if deposit_doc.exists:
+            deposit_data = deposit_doc.to_dict()
+            available_funds = float(deposit_data.get('availableFunds', 0))
+        # Get assets
+        assets_ref = db.collection('assets').document(user_id)
+        assets_doc = assets_ref.get()
+        assets = []
+        if assets_doc.exists:
+            assets = assets_doc.to_dict().get('assets', [])
+        total_value = 0
+        total_gains = 0
+        total_invested = 0
+
+        # Fetch latest NAVs for all ISINs in user's assets
+        isin_list = [asset.get('isin') for asset in assets if asset.get('isin')]
+        latest_navs = {}
+        if isin_list:
+            funds_ref = db.collection('funds')
+            for isin in isin_list:
+                fund_doc = funds_ref.document(isin).get()
+                if fund_doc.exists:
+                    fund_data = fund_doc.to_dict()
+                    latest_nav = fund_data.get('latestnav')
+                    if latest_nav is not None:
+                        latest_navs[isin] = float(latest_nav)
+
+        for asset in assets:
+            shares = float(asset.get('shares', 0))
+            isin = asset.get('isin')
+            # Use latest NAV from funds table if available, else fallback to asset's nav
+            nav = latest_navs.get(isin, float(asset.get('nav', 0)))
+            old_nav = float(asset.get('old_nav', asset.get('nav', 0)))  # fallback to nav if not present
+            total_value += shares * nav
+            total_invested += shares * old_nav
+            total_gains += (nav - old_nav) * shares
+
+        # This Month: sum of assets purchased this month
+        from datetime import datetime
+        from_zone = timezone.utc
+        now = datetime.now(from_zone)
+        this_month = now.month
+        this_year = now.year
+        month_invested = 0
+        for asset in assets:
+            pd = asset.get('purchaseDate')
+            if pd:
+                if isinstance(pd, str):
+                    try:
+                        pd_dt = datetime.fromisoformat(pd)
+                    except Exception:
+                        continue
+                else:
+                    pd_dt = pd
+                if pd_dt.month == this_month and pd_dt.year == this_year:
+                    isin = asset.get('isin')
+                    nav = latest_navs.get(isin, float(asset.get('nav', 0)))
+                    month_invested += nav * float(asset.get('shares', 0))
+        metrics = {
+            'total_portfolio_value': total_value,
+            'total_gains': total_value - total_invested,
+            'total_gains_percent': ((total_value - total_invested) / total_invested * 100) if total_invested > 0 else 0,
+            'available_funds': available_funds,
+            'this_month': month_invested
+        }
+        return metrics, 200
+    except Exception as e:
+        print(f"Error getting portfolio metrics for {user_id}: {e}")
+        return {'error': str(e)}, 500
+
+def get_assets_with_fund_info(user_id):
+    try:
+        db = firestore.client()
+        assets_ref = db.collection('assets').document(user_id)
+        assets_doc = assets_ref.get()
+        assets = []
+        if assets_doc.exists:
+            assets = assets_doc.to_dict().get('assets', [])
+        result = []
+        funds_ref = db.collection('funds')
+        for asset in assets:
+            isin = asset.get('isin')
+            shares = float(asset.get('shares', 0))
+            nav = float(asset.get('nav', 0))
+            amount_invested = shares * float(asset.get('old_nav', nav))
+            fund_doc = funds_ref.document(isin).get()
+            fund_info = fund_doc.to_dict() if fund_doc.exists else {}
+            fund_name = fund_info.get('name', '')
+            fund_category = fund_info.get('category', '')
+            fund_type = fund_info.get('type', '')
+            risk = fund_info.get('risk', '')
+            current_nav = float(fund_info.get('latestnav', nav))
+            total_units = shares
+            total_returns = (current_nav - float(asset.get('old_nav', nav))) * shares
+            gains = (current_nav * shares) - amount_invested
+            gains_percentage = (gains / amount_invested * 100) if amount_invested > 0 else 0
+            result.append({
+                'isin': isin,
+                'fund_name': fund_name,
+                'fund_category': fund_category,
+                'fund_type': fund_type,
+                'risk': risk,
+                'amount_invested': round(amount_invested, 2),
+                'current_nav': round(current_nav, 2),
+                'total_returns': round(total_returns, 2),
+                'total_units': round(total_units, 2),
+                'gains': round(gains, 2),
+                'gains_percentage': round(gains_percentage, 2),
+                'todayChange': 1.20,  # If this should be dynamic, update accordingly
+            })
+        return result, 200
+    except Exception as e:
+        print(f"Error retrieving assets with fund info for {user_id}: {e}")
+        return {'error': str(e)}, 500

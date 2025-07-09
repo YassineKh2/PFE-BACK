@@ -1,27 +1,40 @@
 from datetime import datetime
 from typing import Dict, List, Optional
+from firebase_admin import firestore
 
-# In-memory storage for messages (you might want to use a database in production)
-chat_history: Dict[str, List[Dict]] = {}
 
-def save_message(room: str, username: str, message: str) -> Dict:
-    """
-    Save a message to the chat history
-    """
-    message_data = {
-        'username': username,
-        'message': message,
-        'timestamp': str(datetime.now())
-    }
-    
-    if room not in chat_history:
-        chat_history[room] = []
-    
-    chat_history[room].append(message_data)
-    return message_data
+def save_message(chatid: str, message: Dict) -> Dict:
+    try:
+        db = firestore.client()
+        chat_ref = db.collection("chats").document(chatid)
+        chat_doc = chat_ref.get()
+        if not chat_doc.exists:
+            return {"error": "Chat not found"}, 404
 
-def get_chat_history(room: str) -> List[Dict]:
-    """
-    Get chat history for a specific room
-    """
-    return chat_history.get(room, [])
+        chat_ref.update({
+            "messages": firestore.ArrayUnion([message])
+        })
+        return message, 200
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return {"error": str(e)}, 500
+
+
+
+def GetChatId(userId1: str, userId2: str):
+    try:
+        db = firestore.client()
+
+        chats_ref = db.collection("chats")
+        query = chats_ref.where("iduser1", "in", [userId1, userId2]).where("iduser2", "in", [userId1, userId2])
+        results = query.get()
+
+        for chat_doc in results:
+            chat_data = chat_doc.to_dict()
+            chat_data['chatId'] = chat_doc.id 
+            return chat_data, 200
+
+        return {"error": "Chat not found"}, 404
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return {"error": str(e)}, 500

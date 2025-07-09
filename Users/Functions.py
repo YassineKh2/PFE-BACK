@@ -605,3 +605,34 @@ def UpdateSystemPreferencesRefused(iduser):
     except Exception as e:
         print(f"An error occurred: {e}")
         return {"error": str(e)}, 500
+
+
+def GetManagerId(user_id):
+    try:
+        db = firestore.client()
+        user_ref = db.collection("users").document(user_id)
+        user_doc = user_ref.get()
+        if not user_doc.exists:
+            return {"error": "User not found"}, 404
+        user_data = user_doc.to_dict()
+        manager_id = user_data.get("managerId")
+        return {"managerId": manager_id}, 200
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return {"error": str(e)}, 500
+
+
+def GetManagedUsers(user_id):
+    try:
+        db = firestore.client()
+        users_ref = db.collection("users")
+        query = users_ref.where("managerId", "==", user_id)
+        managed_users = []
+        for doc in query.stream():
+            user_data = doc.to_dict()
+            user_data["id"] = doc.id
+            managed_users.append(user_data)
+        return {"managedUsers": managed_users}, 200
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return {"error": str(e)}, 500
