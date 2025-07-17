@@ -715,3 +715,307 @@ def get_assets_with_fund_info(user_id):
     except Exception as e:
         print(f"Error retrieving assets with fund info for {user_id}: {e}")
         return {'error': str(e)}, 500
+
+
+def sell_asset(user_id, sell_data):
+    try:
+        db = firestore.client()
+        mfid = sell_data.get('isin')
+        amount_to_redeem = float(sell_data.get('shares', 0))
+        if not mfid or amount_to_redeem <= 0:
+            return {'error': 'Invalid sell data'}, 400
+
+        # Get user's assets
+        assets_ref = db.collection('assets').document(user_id)
+        assets_doc = assets_ref.get()
+        if not assets_doc.exists:
+            return {'error': 'No assets found for user'}, 404
+        assets_data = assets_doc.to_dict()
+        assets_list = assets_data.get('assets', [])
+        asset_found = False
+        for i, asset in enumerate(assets_list):
+            if asset.get('isin') == mfid:
+                current_shares = float(asset.get('shares', 0))
+                name = asset.get('name')
+                # Get latest NAV
+                funds_ref = db.collection('funds')
+                fund_doc = funds_ref.document(mfid).get()
+                nav = float(fund_doc.to_dict().get('latestnav', asset.get('nav', 0))) if fund_doc.exists else float(asset.get('nav', 0))
+                if nav <= 0:
+                    return {'error': 'Invalid NAV value'}, 400
+                shares_to_sell = amount_to_redeem / nav
+                if shares_to_sell > current_shares:
+                    return {'error': 'Not enough shares to sell'}, 400
+                value = shares_to_sell * nav  # This should be close to amount_to_redeem
+                # Remove shares
+                remaining_shares = current_shares - shares_to_sell
+                if remaining_shares <= 0.00001:  # Floating point tolerance
+                    assets_list.pop(i)
+                else:
+                    asset['shares'] = remaining_shares
+                    assets_list[i] = asset
+                asset_found = True
+                break
+        if not asset_found:
+            return {'error': 'Asset not found'}, 404
+        # Update assets
+        assets_ref.set({'assets': assets_list}, merge=True)
+        # Add value to deposit
+        deposit_ref = db.collection('deposits').document(user_id)
+        deposit_doc = deposit_ref.get()
+        if not deposit_doc.exists:
+            return {'error': 'Deposit record not found'}, 404
+        deposit_data = deposit_doc.to_dict()
+        available_funds = float(deposit_data.get('availableFunds', 0)) + value
+        deposit_ref.update({'availableFunds': available_funds, 'editedAt': datetime.now(timezone.utc)})
+        # Log transaction
+        log_ref = db.collection('transactions').document()
+        log_ref.set({
+            'user_id': user_id,
+            'mfid': mfid,
+            'shares_sold': shares_to_sell,
+            'nav': nav,
+            'value': value,
+            'timestamp': datetime.now(timezone.utc),
+            'type': 'sell'
+        })
+
+        log_data = {
+            'userId': user_id,
+            'action': 'Sell',
+            'date': datetime.now(timezone.utc),
+            'type': 'Redeam',    
+            'description': name,
+            'amount': amount_to_redeem
+        }
+
+        db.collection('logs').add(log_data)
+
+
+        return {
+            'message': 'Asset sold successfully',
+            'value': value,
+            'shares_sold': shares_to_sell,
+            'shares_remaining': remaining_shares if asset_found else 0,
+            'availableFunds': available_funds
+        }, 200
+    except Exception as e:
+        print(f"Error selling asset for {user_id}: {e}")
+        return {'error': str(e)}, 500
+
+def get_single_asset_info(user_id, data):
+    try:
+        isin = data.get('isin')
+        if not isin:
+            return {'error': 'ISIN is required'}, 400
+        db = firestore.client()
+        assets_ref = db.collection('assets').document(user_id)
+        assets_doc = assets_ref.get()
+        if not assets_doc.exists:
+            return {'error': 'No assets found for user'}, 404
+        assets_list = assets_doc.to_dict().get('assets', [])
+        asset = next((a for a in assets_list if a.get('isin') == isin), None)
+        if not asset:
+             return {
+                'isin': isin,
+                'fund_name': '',
+                'fund_category': '',
+                'fund_type': '',
+                'amount_invested': 0,
+                'current_nav': 0,
+                'total_returns': 0,
+                'total_units': 0
+            },200
+        # Get fund info
+        funds_ref = db.collection('funds')
+        fund_doc = funds_ref.document(isin).get()
+        fund_info = fund_doc.to_dict() if fund_doc.exists else {}
+        fund_name = fund_info.get('name', '')
+        fund_category = fund_info.get('category', '')
+        fund_type = fund_info.get('type', '')
+        current_nav = float(fund_info.get('latestnav', asset.get('nav', 0)))
+        shares = float(asset.get('shares', 0))
+        amount_invested = shares * float(asset.get('old_nav', asset.get('nav', 0)))
+        total_returns = (current_nav - float(asset.get('old_nav', asset.get('nav', 0)))) * shares
+        result = {
+            'isin': isin,
+            'fund_name': fund_name,
+            'fund_category': fund_category,
+            'fund_type': fund_type,
+            'amount_invested': amount_invested,
+            'current_nav': current_nav,
+            'total_returns': total_returns,
+            'total_units': shares
+        }
+        return result, 200
+    except Exception as e:
+        print(f"Error retrieving single asset info for {user_id}: {e}")
+        return {'error': str(e)}, 500
+
+def get_quick_stats(user_id):
+    try:
+        db = firestore.client()
+        assets_ref = db.collection('assets').document(user_id)
+        assets_doc = assets_ref.get()
+        assets = []
+        if assets_doc.exists:
+            assets = assets_doc.to_dict().get('assets', [])
+        total_invested = 0
+        best_performer = None
+        best_performance = float('-inf')
+        num_funds = len(assets)
+        now = datetime.now(timezone.utc)
+        oldest_date = now
+        for asset in assets:
+            shares = float(asset.get('shares', 0))
+            old_nav = float(asset.get('old_nav', asset.get('nav', 0)))
+            invested = shares * old_nav
+            total_invested += invested
+            isin = asset.get('isin')
+            # Get fund info
+            funds_ref = db.collection('funds')
+            fund_doc = funds_ref.document(isin).get()
+            fund_info = fund_doc.to_dict() if fund_doc.exists else {}
+            fund_name = fund_info.get('name', isin)
+            current_nav = float(fund_info.get('latestnav', asset.get('nav', 0)))
+            perf = ((current_nav - old_nav) / old_nav * 100) if old_nav > 0 else 0
+            if perf > best_performance:
+                best_performance = perf
+                best_performer = f"{fund_name} (+{round(perf, 1)}%)"
+            # Portfolio age
+            pd = asset.get('purchaseDate')
+            if pd:
+                if isinstance(pd, str):
+                    try:
+                        pd_dt = datetime.fromisoformat(pd)
+                    except Exception:
+                        continue
+                else:
+                    pd_dt = pd
+                if pd_dt < oldest_date:
+                    oldest_date = pd_dt
+        # Portfolio age calculation
+        age_years = now.year - oldest_date.year
+        age_months = now.month - oldest_date.month
+        if age_months < 0:
+            age_years -= 1
+            age_months += 12
+        portfolio_age = f"{age_years} years {age_months} months" if num_funds > 0 else "0 months"
+        stats = {
+            'total_invested': round(total_invested, 2),
+            'num_funds': num_funds,
+            'best_performer': best_performer or '',
+            'portfolio_age': portfolio_age
+        }
+        return stats, 200
+    except Exception as e:
+        print(f"Error getting quick stats for {user_id}: {e}")
+        return {'error': str(e)}, 500
+
+def get_managed_users_assets(manager_id):
+    try:
+        db = firestore.client()
+        # Get manager's managed users
+        manager_ref = db.collection('users').document(manager_id)
+        manager_doc = manager_ref.get()
+        if not manager_doc.exists:
+            return {'error': 'Manager not found'}, 404
+        manager_data = manager_doc.to_dict()
+        managed_users = manager_data.get('managedUsers', [])
+        result = []
+        for user_id in managed_users:
+            # Get deposit info
+            deposit_ref = db.collection('deposits').document(user_id)
+            deposit_doc = deposit_ref.get()
+            available_funds = 0
+            if deposit_doc.exists:
+                deposit_data = deposit_doc.to_dict()
+                available_funds = float(deposit_data.get('availableFunds', 0))
+            # Get assets
+            assets_ref = db.collection('assets').document(user_id)
+            assets_doc = assets_ref.get()
+            assets = []
+            if assets_doc.exists:
+                assets = assets_doc.to_dict().get('assets', [])
+            user_assets = []
+            for asset in assets:
+                isin = asset.get('isin')
+                name = asset.get('name')
+                shares = float(asset.get('shares', 0))
+                nav = float(asset.get('nav', 0))
+                amount_invested = shares * float(asset.get('old_nav', nav))
+                user_assets.append({
+                    'name': name,
+                    'isin': isin,
+                    'shares': round(shares, 2),
+                    'amount_invested': round(amount_invested, 2)
+                })
+            result.append({
+                'user_id': user_id,
+                'available_funds': round(available_funds, 2),
+                'assets': user_assets
+            })
+        return result, 200
+    except Exception as e:
+        print(f"Error getting managed users assets for {manager_id}: {e}")
+        return {'error': str(e)}, 500
+
+def get_manager_stats(manager_id):
+    try:
+        db = firestore.client()
+        # Get manager's managed users
+        manager_ref = db.collection('users').document(manager_id)
+        manager_doc = manager_ref.get()
+        if not manager_doc.exists:
+            return {'error': 'Manager not found'}, 404
+        manager_data = manager_doc.to_dict()
+        managed_users = manager_data.get('managedUsers', [])
+        total_clients = len(managed_users)
+        total_aum = 0
+        total_perf = 0
+        perf_count = 0
+        active_orders = 0
+        for user_id in managed_users:
+            # Get assets
+            assets_ref = db.collection('assets').document(user_id)
+            assets_doc = assets_ref.get()
+            assets = []
+            if assets_doc.exists:
+                assets = assets_doc.to_dict().get('assets', [])
+            user_aum = 0
+            user_perf = 0
+            user_perf_count = 0
+            for asset in assets:
+                shares = float(asset.get('shares', 0))
+                nav = float(asset.get('nav', 0))
+                old_nav = float(asset.get('old_nav', nav))
+                fund_isin = asset.get('isin')
+                # Get latest NAV
+                funds_ref = db.collection('funds')
+                fund_doc = funds_ref.document(fund_isin).get()
+                current_nav = float(fund_doc.to_dict().get('latestnav', nav)) if fund_doc.exists else nav
+                user_aum += shares * current_nav
+                if old_nav > 0:
+                    user_perf += ((current_nav - old_nav) / old_nav * 100)
+                    user_perf_count += 1
+            total_aum += user_aum
+            if user_perf_count > 0:
+                total_perf += (user_perf / user_perf_count)
+                perf_count += 1
+            # Count active orders (buy/sell logs)
+            logs_ref = db.collection('logs')
+            logs = logs_ref.where('userId', '==', user_id).stream()
+            for log in logs:
+                if log.to_dict().get('action') in ['Buy', 'Sell']:
+                    active_orders += 1
+        avg_perf = (total_perf / perf_count) if perf_count > 0 else 0
+        stats = {
+            'total_clients': total_clients,
+            'total_aum': round(total_aum, 2),
+            'avg_performance': round(avg_perf, 2),
+            'active_orders': active_orders
+        }
+        return stats, 200
+    except Exception as e:
+        print(f"Error getting manager stats for {manager_id}: {e}")
+        return {'error': str(e)}, 500
